@@ -1,0 +1,10 @@
+--- a/osfmk/arm64/arm_init.c
++++ b/osfmk/arm64/arm_init.c
+@@ -100,6 +100,8 @@
+ 
+ void arm_init(void)
+ {
++    *(volatile unsigned int *)0x5c000000 = 0xFF00FF00; /* A11 PROBE: 刷绿屏 */
++
+     boolean_t is_boot_cpu = ml_get_cpu_number() == 0;
+     
