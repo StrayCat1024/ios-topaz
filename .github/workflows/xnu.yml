@@ -41,6 +41,12 @@ jobs:
           git init -q dxb
           git -C dxb fetch -q --depth 1 "$DXB_REPO" "$DXB_SHA"
           git -C dxb checkout -q FETCH_HEAD
+          cp xnu/patches/*.patch xnu/patches/*.sh dxb/patches/
+          
+          # 打印一下源码到底在哪
+          echo "=== FIND START.S ==="
+          find . -name "start.s"
+          
           sed -i '' 's/ARCHS="x86_64 arm64e" VALID_ARCHS="x86_64 arm64e"/ARCHS="arm64" VALID_ARCHS="arm64" OTHER_CFLAGS="-mkernel -nostdinc -Wno-packed -mcpu=cortex-a53"/' dxb/build.sh
           sed -i '' 's|export CC="$(xcrun -find clang)"|export CC="$CCACHE_WRAP/clang"|; s|export CXX="$(xcrun -find clang++)"|export CXX="$CCACHE_WRAP/clang++"|' dxb/build.sh
 
@@ -57,16 +63,6 @@ jobs:
             printf '#!/bin/sh\nexec ccache %s "$@"\n' "$(xcrun -find $t)" > "$CCACHE_WRAP/$t"
             chmod +x "$CCACHE_WRAP/$t"
           done
-
-      - name: Force Inject ASM Probe
-        working-directory: dxb
-        run: |
-          echo "=== BEFORE INJECTION ==="
-          grep -n "_start:" xnu/osfmk/arm64/start.s
-          # 强行用 Perl 正则插入汇编代码
-          perl -0777 -pi -e 's/(_start:\s*\n)/$1\tmov x0, #0x5c000000\n\tmovz w1, #0xff00, lsl #16\n\tmovz x2, #0x5400, lsl #16\n\tmovk x2, #0x5400, lsl #16\n1:\tstr w1, [x0], #4\n\tsubs x2, x2, #1\n\tb.ne 1b\n/g' xnu/osfmk/arm64/start.s
-          echo "=== AFTER INJECTION ==="
-          grep -n -A10 "_start:" xnu/osfmk/arm64/start.s
 
       - name: Restore ccache
         uses: actions/cache@v4
