@@ -1,0 +1,9 @@
+--- a/osfmk/arm64/arm_init.c
++++ b/osfmk/arm64/arm_init.c
+@@ -104,6 +104,8 @@
+ 
+ void arm_init(void)
+ {
++    *(volatile unsigned int *)0x5c000000 = 0xFF00FF00; /* A11 PROBE */
++    
+     boolean_t is_boot_cpu = ml_get_cpu_number() == 0;
