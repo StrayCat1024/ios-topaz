@@ -21,7 +21,6 @@ on:
       - "xnu/patches/**"
       - ".github/workflows/xnu.yml"
 
-
 concurrency:
   group: xnu-${{ github.ref }}
   cancel-in-progress: true
@@ -32,7 +31,6 @@ env:
   MACOS_VERSION: ${{ inputs.macos_version || '13.5' }}
   KERNEL_CONFIG: ${{ inputs.kernel_config || 'DEVELOPMENT' }}
   MACHINE_CONFIG: ${{ inputs.machine_config || 'SWEET' }}
-  # ccache: xnu is ~2000 compiles; a patch usually changes a few of them
   CCACHE_DIR: ${{ github.workspace }}/.ccache
   CCACHE_BASEDIR: ${{ github.workspace }}
   CCACHE_COMPILERCHECK: content
@@ -42,8 +40,6 @@ env:
 
 jobs:
   build:
-    # macos-14 still ships Xcode 15.x: its iig matches the xnu-8796 IORPC ABI
-    # (Xcode 16's iig emits IORPC.kernelContent, which this xnu lacks)
     runs-on: macos-14
     timeout-minutes: 120
     steps:
@@ -54,23 +50,29 @@ jobs:
           git init -q dxb
           git -C dxb fetch -q --depth 1 "$DXB_REPO" "$DXB_SHA"
           git -C dxb checkout -q FETCH_HEAD
-          # 12.5-14.3 use the top-level patches dir; ours go next to blacktop's
           cp xnu/patches/*.patch xnu/patches/*.sh dxb/patches/
-          # libfirehose_kernel is built arm64e-only; the SWEET kernel is plain arm64.
-          # topaz: Cortex-A53/A73 (ARMv8.0), so the same -mcpu as the kernel
-          # (clang's apple-m1 default emits LSE atomics and LDAPR)
+          
+          # ==========================================
+          # A11 强制注入绿屏探针脚本
+          # 生成一个可执行的 .sh 文件，让 build.sh 在编译前执行
+          # ==========================================
+          cat > dxb/patches/999-a11-probe.sh << 'EOF'
+          #!/bin/bash
+          echo "Injecting A11 green screen probe..."
+          for f in $(find . -name start.s); do
+            perl -pi -e 's/_start:/_start:\n\tmov x0, #0x5c000000\n\tmovz w1, #0xff00, lsl #16\n\tmovz x2, #0x5400, lsl #16\n\tmovk x2, #0x5400, lsl #16\n1:\tstr w1, [x0], #4\n\tsubs x2, x2, #1\n\tb.ne 1b\n\tmov x3, #0x40000000\n2:\tsubs x3, x3, #1\n\tb.ne 2b/' "$f"
+          done
+          EOF
+          chmod +x dxb/patches/999-a11-probe.sh
+          
+          # 备份一下修改后的 build.sh 编译选项
           sed -i '' 's/ARCHS="x86_64 arm64e" VALID_ARCHS="x86_64 arm64e"/ARCHS="arm64" VALID_ARCHS="arm64" OTHER_CFLAGS="-mkernel -nostdinc -Wno-packed -mcpu=cortex-a53"/' dxb/build.sh
-          grep -c 'OTHER_CFLAGS="-mkernel -nostdinc -Wno-packed -mcpu=cortex-a53"' dxb/build.sh
-          # xnu's makedefs take CC/CXX from the environment dxb exports; xcodebuild
-          # (mig, ctf tools) needs a single executable, so point at wrappers
           sed -i '' 's|export CC="$(xcrun -find clang)"|export CC="$CCACHE_WRAP/clang"|; s|export CXX="$(xcrun -find clang++)"|export CXX="$CCACHE_WRAP/clang++"|' dxb/build.sh
-          grep -c 'export CC="$CCACHE_WRAP/clang"' dxb/build.sh
           ls dxb/patches
 
       - name: Deps
         run: |
           brew install jq gum bash cmake ninja ccache
-          # build.sh only checks that xcodes exists (Xcode is preinstalled); no bottle on macOS 14
           printf '#!/bin/sh\nexit 0\n' | sudo tee /usr/local/bin/xcodes >/dev/null
           sudo chmod +x /usr/local/bin/xcodes
           sw_vers
@@ -85,7 +87,6 @@ jobs:
             printf '#!/bin/sh\nexec ccache %s "$@"\n' "$(xcrun -find $t)" > "$CCACHE_WRAP/$t"
             chmod +x "$CCACHE_WRAP/$t"
           done
-          cat "$CCACHE_WRAP/clang"
 
       - name: Restore ccache
         uses: actions/cache@v4
@@ -98,7 +99,6 @@ jobs:
       - name: Build
         working-directory: dxb
         env:
-          # keep going after errors so one run reports every compile failure
           MAKEFLAGS: ${{ inputs.keep_going == 'false' && '' || '-k' }}
         run: |
           ccache -z
@@ -108,8 +108,6 @@ jobs:
       - name: Package build tree for local compiles
         if: always()
         run: |
-          # Generated headers, config option headers, mig output and the patched
-          # source: enough to re-run any single compile command from the log locally.
           SDK=$(xcrun --sdk macosx --show-sdk-path)
           mkdir -p sdk-kernel-platform
           cp -R "$SDK/System/Library/Frameworks/Kernel.framework/Versions/A/PrivateHeaders/platform" sdk-kernel-platform/ || true
