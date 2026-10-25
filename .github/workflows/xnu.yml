@@ -41,16 +41,9 @@ jobs:
           git init -q dxb
           git -C dxb fetch -q --depth 1 "$DXB_REPO" "$DXB_SHA"
           git -C dxb checkout -q FETCH_HEAD
-          # 注意：这里保留了原版的 patch 拷贝
           cp xnu/patches/*.patch xnu/patches/*.sh dxb/patches/
           sed -i '' 's/ARCHS="x86_64 arm64e" VALID_ARCHS="x86_64 arm64e"/ARCHS="arm64" VALID_ARCHS="arm64" OTHER_CFLAGS="-mkernel -nostdinc -Wno-packed -mcpu=cortex-a53"/' dxb/build.sh
           sed -i '' 's|export CC="$(xcrun -find clang)"|export CC="$CCACHE_WRAP/clang"|; s|export CXX="$(xcrun -find clang++)"|export CXX="$CCACHE_WRAP/clang++"|' dxb/build.sh
-
-      - name: Inject ASM Probe
-        run: |
-          # 强制在汇编入口插入绿屏探针
-          find dxb -name "start.s" -exec perl -0777 -pi -e 's/(LowResetVectorBase:\s*)/$1\n\tmov x0, #0x5c000000\n\tmovz w1, #0xff00, lsl #16\n\tmovz x2, #0x5400, lsl #16\n\tmovk x2, #0x5400, lsl #16\n1:\tstr w1, [x0], #4\n\tsubs x2, x2, #1\n\tb.ne 1b\n\tmov x3, #0x40000000\n2:\tsubs x3, x3, #1\n\tb.ne 2b\n/s' {} +
-          find dxb -name "start.s" -exec perl -0777 -pi -e 's/(_start:\s*)/$1\n\tmov x0, #0x5c000000\n\tmovz w1, #0xff00, lsl #16\n\tmovz x2, #0x5400, lsl #16\n\tmovk x2, #0x5400, lsl #16\n1:\tstr w1, [x0], #4\n\tsubs x2, x2, #1\n\tb.ne 1b\n\tmov x3, #0x40000000\n2:\tsubs x3, x3, #1\n\tb.ne 2b\n/s' {} +
 
       - name: Deps
         run: |
@@ -66,13 +59,12 @@ jobs:
             chmod +x "$CCACHE_WRAP/$t"
           done
 
+      # 强制每次都用新的 run_id 作为 key，彻底禁用旧缓存！
       - name: Restore ccache
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/.ccache
-          key: ccache-${{ env.MACHINE_CONFIG }}-${{ env.KERNEL_CONFIG }}-${{ hashFiles('xnu/patches/**', '.github/workflows/xnu.yml') }}
-          restore-keys: |
-            ccache-${{ env.MACHINE_CONFIG }}-${{ env.KERNEL_CONFIG }}-
+          key: ccache-nocache-${{ github.run_id }}
 
       - name: Build
         working-directory: dxb
