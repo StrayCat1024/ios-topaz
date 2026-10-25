@@ -1,11 +1,10 @@
 --- a/osfmk/arm64/start.s
 +++ b/osfmk/arm64/start.s
-@@ -100,6 +100,17 @@
+@@ -106,6 +106,17 @@
  	.text
  	.align 2
  	.globl _start
  _start:
-+	/* A11 ASM PROBE: 强行刷绿屏 */
 +	mov	x0, #0x5c000000
 +	movz	w1, #0xff00, lsl #16
 +	movz	x2, #0x5400, lsl #16
@@ -14,9 +13,8 @@
 +	str	w1, [x0], #4
 +	subs	x2, x2, #1
 +	b.ne	1b
-+	/* 等待一会儿，确保屏幕刷新 */
 +	mov	x3, #0x40000000
 +2:	subs	x3, x3, #1
 +	b.ne	2b
 +
- 	/* 原来的 start.s 代码继续... */
+ 	/* 这里的原有代码会被保留 */
